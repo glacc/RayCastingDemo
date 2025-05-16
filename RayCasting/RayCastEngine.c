@@ -13,6 +13,7 @@
 #define SCREEN_WIDTH    512
 #define SCREEN_HEIGHT   384
 #define CHANNELS        3
+#define SCALE_FACTOR    2
 
 #define LEVEL_SIZE_X    8
 #define LEVEL_SIZE_Y    8
@@ -22,7 +23,7 @@ const char window_title[] = "RayCast Demo qwq";
 const int screen_width = SCREEN_WIDTH;
 const int screen_height = SCREEN_HEIGHT;
 const int screen_channels = CHANNELS;
-const int scale_factor = 2;
+const int scale_factor = SCALE_FACTOR;
 
 const char wall_texture_name[] = "bricks.png";
 
@@ -31,6 +32,7 @@ const float fade_distance = 8.0F;
 const float half_fov = 40.0F / 180.0F * (float)M_PI;
 
 const float mouse_sensitivity = 0.0025F;
+const float player_turn_speed_per_tick = 2.5F / 180.0F * (float)M_PI;
 
 const float player_vel_walk_per_tick = 0.025F;
 const float player_vel_sprint_per_tick = 0.05F;
@@ -169,6 +171,7 @@ bool RayCast_Initialize(void)
         SDL_Log("%s Failed to create texture: %s", program_log_tag, SDL_GetError());
         goto Error;
     }
+    SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
 
     wall_texture = SDL_LoadBMP("bricks.bmp");
     if (wall_texture == NULL)
@@ -287,11 +290,15 @@ static void RayCast_PlayerCollisionDetection(void)
         if (!horz_inside || push_both_dir)
         {
             if (tile_center_to_player_x >= 0.0F && (!is_wall_r || push_both_dir))
+            {
                 player_x = tile_center_x + offset_from_tile_center;
+                player_vel_x = 0.0F;
+            }
             else if (tile_center_to_player_x < 0.0F && (!is_wall_l || push_both_dir))
+            {
                 player_x = tile_center_x - offset_from_tile_center;
-
-            player_vel_x = 0.0F;
+                player_vel_x = 0.0F;
+            }
         }
 
         // Vertical //
@@ -299,11 +306,15 @@ static void RayCast_PlayerCollisionDetection(void)
         if (!vert_inside || push_both_dir)
         {
             if (tile_center_to_player_y >= 0.0F && (!is_wall_d || push_both_dir))
+            {
                 player_y = tile_center_y + offset_from_tile_center;
+                player_vel_y = 0.0F;
+            }
             else if (tile_center_to_player_y < 0.0F && (!is_wall_u || push_both_dir))
+            {
                 player_y = tile_center_y - offset_from_tile_center;
-
-            player_vel_y = 0.0F;
+                player_vel_y = 0.0F;
+            }
         }
     }
 }
@@ -602,14 +613,22 @@ static void RayCast_DoRayCastAndRender(void)
     uint8_t *pixel_buffer = NULL;
     int pitch;
 
-    SDL_LockTexture(texture, NULL, &pixel_buffer, &pitch);
+    SDL_LockTexture(texture, NULL, (void **)&pixel_buffer, &pitch);
 
-    memset((void *)pixel_buffer, 0, screen_width * screen_height * screen_channels);
+    // memset((void *)pixel_buffer, 0, screen_width * screen_height * screen_channels);
 
     float middle_y = screen_height / 2.0F;
 
     for (int x = 0; x < screen_width; x++)
     {
+        int y = 0;
+
+        // int pixel_buffer_offset = ((pixel_y_start * screen_width) + x) * screen_channels;
+        int pixel_buffer_offset = x * screen_channels;
+        int increment_per_row = (screen_width - 1) * screen_channels;
+
+        uint8_t *ptr_pixel_buffer = pixel_buffer + pixel_buffer_offset;
+
         float current_z = z_list[x];
 
         if (current_z < z_cutoff)
@@ -623,9 +642,23 @@ static void RayCast_DoRayCastAndRender(void)
         int range_y = end_y - start_y;
 
         float brightness = fmaxf(fade_distance - current_z, 0.0) / fade_distance;
-        brightness = fminf(fmaxf(0.0F, brightness), 1.0F);
+        if (brightness <= 0.0F)
+        {
+            while (y < screen_height)
+            {
+                *ptr_pixel_buffer++ = 0;
+                *ptr_pixel_buffer++ = 0;
+                *ptr_pixel_buffer++ = 0;
 
-        // float texture_x = 
+                ptr_pixel_buffer += increment_per_row;
+
+                y++;
+            }
+
+            continue;
+        }
+
+        brightness = fminf(fmaxf(0.0F, brightness), 1.0F);
 
         int pixel_y_start = start_y;
         if (pixel_y_start < 0)
@@ -635,10 +668,16 @@ static void RayCast_DoRayCastAndRender(void)
         if (pixel_y_end >= screen_height)
             pixel_y_end = screen_height;
 
-        int pixel_buffer_offset = ((pixel_y_start * screen_width) + x) * screen_channels;
-        int increment_per_row = (screen_width - 1) * screen_channels;
+        while (y < pixel_y_start)
+        {
+            *ptr_pixel_buffer++ = 0;
+            *ptr_pixel_buffer++ = 0;
+            *ptr_pixel_buffer++ = 0;
 
-        uint8_t *ptr_pixel_buffer = pixel_buffer + pixel_buffer_offset;
+            ptr_pixel_buffer += increment_per_row;
+
+            y++;
+        }
 
         if (wall_texture == NULL)
         {
@@ -646,13 +685,15 @@ static void RayCast_DoRayCastAndRender(void)
 
             uint8_t brightness_byte = (uint8_t)(brightness * 255.0F);
 
-            for (int y = pixel_y_start; y < pixel_y_end; y++)
+            while (y < pixel_y_end)
             {
                 *ptr_pixel_buffer++ = brightness_byte;
                 *ptr_pixel_buffer++ = brightness_byte;
                 *ptr_pixel_buffer++ = brightness_byte;
 
                 ptr_pixel_buffer += increment_per_row;
+
+                y++;
             }
         }
         else
@@ -665,7 +706,7 @@ static void RayCast_DoRayCastAndRender(void)
             if (texture_x >= wall_tex_width)
                 texture_x = wall_tex_width - 1;
 
-            for (int y = pixel_y_start; y < pixel_y_end; y++)
+            while (y < pixel_y_end)
             {
                 int texture_y = (int)(((float)(y - start_y) / (float)range_y) * wall_tex_height);
                 if (texture_y < 0)
@@ -680,7 +721,20 @@ static void RayCast_DoRayCastAndRender(void)
                 *ptr_pixel_buffer++ = (uint8_t)((*ptr_wall_tex++) * brightness);
 
                 ptr_pixel_buffer += increment_per_row;
+
+                y++;
             }
+        }
+
+        while (y < screen_height)
+        {
+            *ptr_pixel_buffer++ = 0;
+            *ptr_pixel_buffer++ = 0;
+            *ptr_pixel_buffer++ = 0;
+
+            ptr_pixel_buffer += increment_per_row;
+
+            y++;
         }
     }
 
@@ -693,16 +747,14 @@ static void RayCast_MouseMotion(SDL_Event *event)
     player_angle = RayCast_WrapAngle(player_angle);
 }
 
-static void RayCast_CenterlizeMouse(void)
-{
-    if ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) == 0)
-        return;
-
-    SDL_WarpMouseInWindow(window, (float)(screen_width * scale_factor) / 2.0F, (float)(screen_height * scale_factor) / 2.0F);
-}
-
 static void RayCast_PlayerMovement(void)
 {
+    if (KeyStatesSDL_IsKeyDown(&key_states, SDL_SCANCODE_LEFT))
+        player_angle -= player_turn_speed_per_tick;
+    if (KeyStatesSDL_IsKeyDown(&key_states, SDL_SCANCODE_RIGHT))
+        player_angle += player_turn_speed_per_tick;
+    player_angle = RayCast_WrapAngle(player_angle);
+
     float player_angle_right = player_angle + (float)M_PI_2;
 
     float player_accel_forward_x = cosf(player_angle);
@@ -801,8 +853,6 @@ bool RayCast_Tick(void)
 
     if (quit)
         return false;
-
-    RayCast_CenterlizeMouse();
 
     RayCast_PlayerMovement();
 

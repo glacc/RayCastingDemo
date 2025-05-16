@@ -30,11 +30,13 @@ int main(int argc, char *argv[])
                 time_ms = fmodf(time_ms, ms_per_tick);
             }
 
-            SDL_Delay(0);
+            SDL_Delay(1);
         }
     }
 
     RayCast_Deinitialize();
+
+    SDL_Quit();
 
     return 0;
 }
