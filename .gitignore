@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+RayCasting/SDL3-3.2.14-win32-x64/
+RayCasting/SDL3-devel-3.2.14-VC/
+
 # User-specific files
 *.rsuser
 *.suo
